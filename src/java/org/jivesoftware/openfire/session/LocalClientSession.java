@@ -26,6 +26,8 @@ import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.auth.AuthToken;
 import org.jivesoftware.openfire.auth.UnauthorizedException;
 import org.jivesoftware.openfire.cluster.ClusterManager;
+import org.jivesoftware.openfire.entitycaps.EntityCapabilities;
+import org.jivesoftware.openfire.entitycaps.EntityCapabilitiesManager;
 import org.jivesoftware.openfire.net.SASLAuthentication;
 import org.jivesoftware.openfire.privacy.PrivacyList;
 import org.jivesoftware.openfire.privacy.PrivacyListManager;
@@ -41,10 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
-import org.xmpp.packet.JID;
-import org.xmpp.packet.Packet;
-import org.xmpp.packet.Presence;
-import org.xmpp.packet.StreamError;
+import org.xmpp.packet.*;
 
 /**
  * Represents a session between the server and a client.
@@ -109,11 +108,17 @@ public class LocalClientSession extends LocalSession implements ClientSession {
      * session and only for the duration of the session.
      */
     private String activeList;
+
     /**
      * Default privacy list used for the session's user. This list is processed if there
      * is no active list set for the session.
      */
     private String defaultList;
+
+    /**
+     * Defines whether a XEP-0191 blocklist was requested by the client of this session.
+     */
+    private boolean hasRequestedBlocklist = false;
 
     static {
         // Fill out the allowedIPs with the system property
@@ -912,6 +917,13 @@ public class LocalClientSession extends LocalSession implements ClientSession {
                 sb.append(String.format("<sm xmlns='%s'/>", StreamManager.NAMESPACE_V3));
             }
         }
+
+        // Add XEP-0115 entity capabilities for the server, so that peer can skip service discovery.
+        final String ver = EntityCapabilitiesManager.getLocalDomainVerHash();
+        if ( ver != null ) {
+            sb.append( String.format( "<c xmlns=\"http://jabber.org/protocol/caps\" hash=\"sha-1\" node=\"%s\" ver=\"%s\"/>", EntityCapabilitiesManager.OPENFIRE_IDENTIFIER_NODE, ver ) );
+        }
+
         return sb.toString();
     }
 
@@ -932,6 +944,16 @@ public class LocalClientSession extends LocalSession implements ClientSession {
     @Override
     public void setMessageCarbonsEnabled(boolean enabled) {
         messageCarbonsEnabled = enabled;
+    }
+
+    @Override
+    public boolean hasRequestedBlocklist() {
+        return hasRequestedBlocklist;
+    }
+
+    @Override
+    public void setHasRequestedBlocklist(boolean hasRequestedBlocklist) {
+        this.hasRequestedBlocklist = hasRequestedBlocklist;
     }
 
     /**

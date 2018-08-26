@@ -92,7 +92,7 @@ public class PluginManager
     /**
      * Plugin metadata for all extracted plugins, mapped by canonical name.
      */
-    private final Map<String, PluginMetadata> pluginMetadata = new TreeMap<>( String.CASE_INSENSITIVE_ORDER );
+    private final Map<String, PluginMetadata> pluginMetadata = Collections.synchronizedMap(new TreeMap<>(String.CASE_INSENSITIVE_ORDER));
 
     private final Map<Plugin, PluginDevEnvironment> pluginDevelopment = new HashMap<>();
     private final Map<Plugin, List<String>> parentPluginMap = new HashMap<>();
@@ -195,11 +195,11 @@ public class PluginManager
             Files.copy( in, partFile, StandardCopyOption.REPLACE_EXISTING );
 
             // Check if zip file, else ZipException caught below.
-            try (JarFile file = new JarFile(partFile.toFile())) {
+            try (JarFile ignored = new JarFile(partFile.toFile())) {
             } catch (ZipException e) {
                 Files.deleteIfExists(partFile);
                 throw e;
-            };
+            }
 
             // Rename temp file to .jar
             Files.move( partFile, absolutePath, StandardCopyOption.REPLACE_EXISTING );
@@ -230,8 +230,7 @@ public class PluginManager
         final DirectoryStream.Filter<Path> filter = new DirectoryStream.Filter<Path>()
         {
             @Override
-            public boolean accept( Path entry ) throws IOException
-            {
+            public boolean accept( Path entry ) {
                 final String name = entry.getFileName().toString();
                 return Files.exists( entry ) && !Files.isDirectory( entry ) &&
                         ( name.equalsIgnoreCase( canonicalName + ".jar" ) || name.equalsIgnoreCase( canonicalName + ".war" ) );
@@ -296,7 +295,12 @@ public class PluginManager
      */
     public Map<String, PluginMetadata> getMetadataExtractedPlugins()
     {
-        return Collections.unmodifiableMap( this.pluginMetadata );
+        // Create a copy of the TreeMap to avoid ConcurrentModificationExceptions
+        // Note; needs to be synchronized as creating the copy iterates over the elements
+        // See https://docs.oracle.com/javase/8/docs/api/java/util/Collections.html#synchronizedMap-java.util.Map-
+        synchronized (this.pluginMetadata) {
+            return Collections.unmodifiableMap(new TreeMap<>(this.pluginMetadata));
+        }
     }
 
     /**
@@ -322,7 +326,7 @@ public class PluginManager
      */
     public Collection<Plugin> getPlugins()
     {
-        return Collections.unmodifiableCollection( Arrays.asList( pluginsLoaded.values().toArray( new Plugin[ pluginsLoaded.size() ] ) ) );
+        return Collections.unmodifiableCollection( Arrays.asList( pluginsLoaded.values().toArray(new Plugin[0]) ) );
     }
 
     /**
@@ -727,8 +731,7 @@ public class PluginManager
         try ( final DirectoryStream<Path> ds = Files.newDirectoryStream( getPluginsDirectory(), new DirectoryStream.Filter<Path>()
         {
             @Override
-            public boolean accept( final Path path ) throws IOException
-            {
+            public boolean accept( final Path path ) {
                 if ( Files.isDirectory( path ) )
                 {
                     return false;
@@ -819,7 +822,7 @@ public class PluginManager
             // See if any child plugins are defined.
             if ( parentPluginMap.containsKey( plugin ) )
             {
-                String[] childPlugins = parentPluginMap.get( plugin ).toArray( new String[ parentPluginMap.get( plugin ).size() ] );
+                String[] childPlugins = parentPluginMap.get( plugin ).toArray(new String[0]);
                 for ( String childPlugin : childPlugins )
                 {
                     Log.debug( "Unloading child plugin: '{}'.", childPlugin );
@@ -948,12 +951,8 @@ public class PluginManager
      * @param className the name of the class to load.
      * @return the class.
      * @throws ClassNotFoundException if the class was not found.
-     * @throws IllegalAccessException if not allowed to access the class.
-     * @throws InstantiationException if the class could not be created.
      */
-    public Class loadClass( Plugin plugin, String className ) throws ClassNotFoundException,
-            IllegalAccessException, InstantiationException
-    {
+    public Class loadClass( Plugin plugin, String className ) throws ClassNotFoundException {
         PluginClassLoader loader = classloaders.get( plugin );
         return loader.loadClass( className );
     }
@@ -1142,7 +1141,7 @@ public class PluginManager
         pluginManagerListeners.add( listener );
         if ( isExecuted() )
         {
-            firePluginsMonitored();
+            firePluginsMonitored(listener);
         }
     }
 
@@ -1216,14 +1215,18 @@ public class PluginManager
 
         for ( final PluginManagerListener listener : pluginManagerListeners )
         {
-            try
-            {
-                listener.pluginsMonitored();
-            }
-            catch ( Exception ex )
-            {
-                Log.warn( "An exception was thrown when one of the pluginManagerListeners was notified of a 'monitored' event!", ex );
-            }
+            firePluginsMonitored(listener);
+        }
+    }
+
+    private void firePluginsMonitored(final PluginManagerListener listener) {
+        try
+        {
+            listener.pluginsMonitored();
+        }
+        catch ( Exception ex )
+        {
+            Log.warn( "An exception was thrown when one of the pluginManagerListeners was notified of a 'monitored' event!", ex );
         }
     }
 
