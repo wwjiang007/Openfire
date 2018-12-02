@@ -7,7 +7,14 @@ if [ "$#" -ne 2 ]; then
 fi
 export RPMARCH=$1
 export JRE_BUNDLE=$2
-export RPMBUILD_HOME=${HOME}/rpmbuild
+export RPMBUILD_HOME=$PWD/rpmbuild
+
+# Remove previous rpmbuild folder
+if [ -d $RPMBUILD_HOME ]; then
+    echo "Removing previous rpmbuild folder"
+    rm -rf $RPMBUILD_HOME
+fi
+
 
 # Setup rpmbuild folders
 mkdir -p ${RPMBUILD_HOME}/SPECS
@@ -40,7 +47,7 @@ else
 fi
 
 # Need to copy in plugins that are defaulted to distribute
-cp -f src/plugins/search/target/search.jar distribution/target/distribution-base/plugins/
+cp -f plugins/search/target/search.jar distribution/target/distribution-base/plugins/
 
 # generate our psuedo source tree, which is actually dist tree from maven
 cd distribution/target

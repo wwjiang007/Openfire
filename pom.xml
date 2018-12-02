@@ -4,20 +4,17 @@
 
     <groupId>org.igniterealtime.openfire</groupId>
     <artifactId>parent</artifactId>
-    <version>4.3.0-SNAPSHOT</version>
+    <version>4.3.0-beta</version>
     <name>Parent</name>
     <packaging>pom</packaging>
 
     <description>Openfire is a cross-platform real-time collaboration server based on the XMPP (Jabber) protocol.</description>
 
     <modules>
-        <module>dbutil</module>
         <module>i18n</module>
         <module>xmppserver</module>
         <module>starter</module>
-        <module>src/plugins</module>
-        <module>webadmin</module>
-        <module>webadmintld</module>
+        <module>plugins</module>
         <module>distribution</module>
     </modules>
 
@@ -121,11 +118,12 @@
 
         <!-- Versions -->
         <!-- Note; the following jetty.version should be identical to the jetty.version in plugins/pom.xml -->
-        <jetty.version>9.4.11.v20180605</jetty.version>
+        <jetty.version>9.4.12.v20180830</jetty.version>
         <standard-taglib.version>1.2.5</standard-taglib.version>
         <mina.version>2.0.7</mina.version>
-        <bouncycastle.version>1.59</bouncycastle.version>
-        <slf4j.version>1.7.7</slf4j.version>
+        <bouncycastle.version>1.60</bouncycastle.version>
+        <slf4j.version>1.7.25</slf4j.version>
+        <log4j.version>2.11.1</log4j.version>
     </properties>
 
     <profiles>
@@ -337,23 +335,18 @@
             </dependency>
             <dependency>
                 <groupId>${project.groupId}</groupId>
-                <artifactId>dbutil</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>${project.groupId}</groupId>
                 <artifactId>webadmin</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-api</artifactId>
-                <version>2.11.0</version>
+                <version>${log4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-core</artifactId>
-                <version>2.11.0</version>
+                <version>${log4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -363,7 +356,7 @@
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
                 <artifactId>log4j-slf4j-impl</artifactId>
-                <version>2.11.0</version>
+                <version>${log4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.directwebremoting</groupId>
