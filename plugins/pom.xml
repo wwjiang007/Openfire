@@ -2,7 +2,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.igniterealtime.openfire</groupId>
-    <version>4.3.0-beta</version>
+    <version>4.4.0-SNAPSHOT</version>
     <artifactId>plugins</artifactId>
     <packaging>pom</packaging>
     <name>Openfire Plugins</name>
@@ -93,45 +93,6 @@
 
     <modules>
         <module>openfire-plugin-assembly-descriptor</module>
-        <module>bookmarks</module>
-        <module>broadcast</module>
-        <module>callbackOnOffline</module>
-        <module>candy</module>
-        <module>certificateManager</module>
-        <module>clientControl</module>
-        <module>contentFilter</module>
-        <module>dbaccess</module>
-        <module>emailListener</module>
-        <module>emailOnAway</module>
-        <module>externalservicediscovery</module>
-        <module>fastpath</module>
-        <module>gojara</module>
-        <module>hazelcast</module>
-        <module>httpFileUpload</module>
-        <module>inverse</module>
-        <module>jingleNodes</module>
-        <module>jmxweb</module>
-        <module>justmarried</module>
-        <module>loadStats</module>
-        <module>monitoring</module>
-        <module>motd</module>
-        <module>mucservice</module>
-        <module>nodejs</module>
-        <module>nonSaslAuthentication</module>
-        <module>packetFilter</module>
-        <module>presence</module>
-        <module>registration</module>
-        <module>restAPI</module>
-        <module>search</module>
-        <module>sip</module>
-        <module>stunserver</module>
-        <module>subscription</module>
-        <module>tikitoken</module>
-        <module>userCreation</module>
-        <module>userImportExport</module>
-        <module>userservice</module>
-        <module>userStatus</module>
-        <module>xmldebugger</module>
     </modules>
 
     <organization>
@@ -159,7 +120,7 @@
         <plugin.name>${project.artifactId}</plugin.name>
 
         <!-- Versions -->
-        <openfire.version>4.3.0-beta</openfire.version>
+        <openfire.version>4.4.0-SNAPSHOT</openfire.version>
         <!-- Note; the following jetty.version should be identical to the jetty.version in xmppserver/pom.xml -->
         <jetty.version>9.4.12.v20180830</jetty.version>
     </properties>
@@ -330,9 +291,9 @@
                                 <goal>single</goal>
                             </goals>
                             <configuration>
-                                <appendAssemblyId>false</appendAssemblyId>
+                                <appendAssemblyId>true</appendAssemblyId>
                                 <finalName>${plugin.name}</finalName>
-                                <attach>false</attach>
+                                <attach>true</attach>
                                 <!-- This is where we use our shared assembly descriptor -->
                                 <descriptorRefs>
                                     <descriptorRef>openfire-plugin-assembly</descriptorRef>
@@ -393,30 +354,32 @@
         </dependency>
     </dependencies>
 
-    <repositories>
+    <distributionManagement>
+        <!-- Repository in which we deploy this project, when desired. -->
         <repository>
             <id>igniterealtime</id>
-            <name>Ignite Realtime Repository (Snapshots)</name>
-            <url>http://igniterealtime.org/repo/</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
+            <name>Ignite Realtime Repository</name>
+            <url>https://www.igniterealtime.org/archiva/repository/maven/</url>
+        </repository>
+    </distributionManagement>
+
+    <repositories>
+        <!-- Where we obtain dependencies. -->
+        <repository>
+            <id>igniterealtime</id>
+            <name>Ignite Realtime Repository</name>
+            <url>https://igniterealtime.org/archiva/repository/maven/</url>
         </repository>
     </repositories>
+
     <pluginRepositories>
+        <!-- Typically used to retrieve Maven plugins used by this project from. This
+             apparently is also used to obtain the dependencies _used by_ plugins
+             (eg: openfire-plugin-assembly-descriptor) -->
         <pluginRepository>
             <id>igniterealtime</id>
-            <name>Ignite Realtime Repository (Snapshots)</name>
-            <url>http://igniterealtime.org/repo/</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
+            <name>Ignite Realtime Repository</name>
+            <url>https://igniterealtime.org/archiva/repository/maven/</url>
         </pluginRepository>
     </pluginRepositories>
 </project>
