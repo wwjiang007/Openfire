@@ -149,15 +149,15 @@
 <script type="text/javascript">
 
     var downloading;
-    function downloadPlugin(url, id) {
+    function downloadPlugin(url, version, id) {
         downloading = true;
         document.getElementById(id + "-image").innerHTML = '<img src="images/working-16x16.gif" border="0"/>';
         document.getElementById(id).style.background = "#FFFFCC";
-        setTimeout("startDownload('" + url + "','" + id + "')", 5000);
+        setTimeout("startDownload('" + url + "','" + version + "','" + id + "')", 1000);
     }
 
-    function startDownload(url, id) {
-        downloader.installPlugin(url, id, downloadComplete);
+    function startDownload(url, version, id) {
+        downloader.installPlugin(url, version, id, downloadComplete);
     }
 
     function downloadComplete(status) {
@@ -305,6 +305,9 @@
                                             <c:if test="${not empty notInstalledPlugin.version}">
                                                 <c:out value="${notInstalledPlugin.version}"/>
                                             </c:if>
+                                            <c:if test="${not empty notInstalledPlugin.releaseDate}">
+                                                <br><c:out value="${notInstalledPlugin.releaseDate}"/>
+                                            </c:if>
                                         </td>
                                         <td width="15%" nowrap valign="top" class="line-bottom-border">
                                             <c:if test="${not empty notInstalledPlugin.author}">
@@ -315,7 +318,7 @@
                                             <c:out value="${admin:byteFormat( notInstalledPlugin.fileSize )}"/>
                                         </td>
                                         <td width="1%" align="center" valign="top" class="line-bottom-border">
-                                            <a href="javascript:downloadPlugin('${fn:escapeXml(notInstalledPlugin.downloadURL)}', '${notInstalledPlugin.hashCode}')">
+                                            <a href="javascript:downloadPlugin('${fn:escapeXml(notInstalledPlugin.downloadURL)}', '${notInstalledPlugin.version}', '${notInstalledPlugin.hashCode}')">
                                                 <span id="${notInstalledPlugin.hashCode}-image">
                                                     <img src="images/add-16x16.gif" width="16" height="16" border="0" alt="<fmt:message key="plugin.available.download" />">
                                                 </span>

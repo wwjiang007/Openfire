@@ -36,6 +36,7 @@ public class AuthToken {
      * the provider username.
      *
      * @param username the username to create an authToken token with.
+     * @return the auth token for the user
      */
     public static AuthToken generateUserToken( String username )
     {
@@ -47,10 +48,21 @@ public class AuthToken {
 
     /**
      * Constructs a new AuthToken that represents an authenticated, but anonymous user.
+     * @return an anonymouse auth token
      */
     public static AuthToken generateAnonymousToken()
     {
         return new AuthToken( null );
+    }
+
+    /**
+     * Constructs a new OneTimeAuthToken that represents an one time recovery user.
+     *
+     * @param token the one time token.
+     * @return the newly generated auth token
+     */
+    public static AuthToken generateOneTimeToken(String token) {
+        return new OneTimeAuthToken(token);
     }
 
     /**
@@ -79,6 +91,7 @@ public class AuthToken {
      * The username can be either a simple username or a full JID.
      *
      * @param jid the username or bare JID to create an authToken token with.
+     * @param anonymous {code true} to generate an anonymous login, otherwise {@code false}
      * @deprecated replaced by {@link #generateAnonymousToken()}
      */
     @Deprecated
@@ -96,7 +109,7 @@ public class AuthToken {
     }
 
     /**
-     * Returns the username associated with this AuthToken. A <tt>null</tt> value
+     * Returns the username associated with this AuthToken. A {@code null} value
      * means that the authenticated user is anonymous.
      *
      * @return the username associated with this AuthToken or null when using an anonymous user.
@@ -113,7 +126,7 @@ public class AuthToken {
      */
     @Deprecated
     public String getDomain() {
-        return JiveGlobals.getProperty("xmpp.domain");
+        return XMPPServerInfo.XMPP_DOMAIN.getValue();
     }
 
     /**
@@ -123,5 +136,17 @@ public class AuthToken {
      */
     public boolean isAnonymous() {
         return username == null;
+    }
+
+    /**
+     * A token that proves that a user uses an one time access token.
+     *
+     * @author ma1uta
+     */
+    public static class OneTimeAuthToken extends AuthToken {
+
+        public OneTimeAuthToken(String token) {
+            super(token);
+        }
     }
 }

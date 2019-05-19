@@ -16,11 +16,6 @@
 
 package org.jivesoftware.util;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.LoggerContext;
-import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.core.config.LoggerConfig;
-
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
@@ -29,7 +24,11 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.Configuration;
+import org.apache.logging.log4j.core.config.LoggerConfig;
 
 /**
  * Openfire makes use of a logging facade (slf4j) to manage its log output. The
@@ -45,43 +44,38 @@ import java.util.Map;
  * @author Guus der Kinderen, guus.der.kinderen@gmail.com
  * @see <a href="http://www.slf4j.org/">http://www.slf4j.org/</a>
  */
-public class Log {
+public final class Log {
 
     private static final org.slf4j.Logger Logger = org.slf4j.LoggerFactory.getLogger(Log.class);
-    public static final String LOG_DEBUG_ENABLED = "log.debug.enabled";
-    
-    // listen for changes to the log.debug.enabled property
-    static {
-        PropertyEventDispatcher.addListener(new PropertyEventListener() {
-            
-            @Override
-            public void propertySet(String property, Map<String, Object> params) {
-                enableDebugLog(property, Boolean.parseBoolean(params.get("value").toString()));
-            }
-            
-            @Override
-            public void propertyDeleted(String property, Map<String, Object> params) {
-                enableDebugLog(property, false);
-            }
-            
-            // ignore these events
-            @Override
-            public void xmlPropertySet(String property, Map<String, Object> params) { }
-            @Override
-            public void xmlPropertyDeleted(String property, Map<String, Object> params) { }
-            
-            private void enableDebugLog(String property, boolean enabled) {
-                if ((LOG_DEBUG_ENABLED).equals(property)) {
-                    Log.setDebugEnabled(enabled);
-                }
-            }
-        });
-    }
-    
+    public static final SystemProperty<Boolean> DEBUG_ENABLED = SystemProperty.Builder.ofType(Boolean.class)
+        .setKey("log.debug.enabled")
+        .setDefaultValue(false)
+        .setDynamic(true)
+        .addListener(Log::setDebugEnabled)
+        .build();
+    /**
+     * @deprecated in favour of {@link #DEBUG_ENABLED}
+     */
+    @Deprecated
+    public static final String LOG_DEBUG_ENABLED = DEBUG_ENABLED.getKey();
+    public static final SystemProperty<Boolean> TRACE_ENABLED = SystemProperty.Builder.ofType(Boolean.class)
+        .setKey("log.trace.enabled")
+        .setDefaultValue(false)
+        .setDynamic(true)
+        .addListener(Log::setTraceEnabled)
+        .build();
+    /**
+     * @deprecated in favour of {@link #TRACE_ENABLED}
+     */
+    @Deprecated
+    public static final String LOG_TRACE_ENABLED = TRACE_ENABLED.getKey();
+    private static boolean debugEnabled = false;
+    private static boolean traceEnabled = false;
 
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#isErrorEnabled()}.
      *             Functionality of this method is delegated there.
+     * @return {@code true} if logging is enabed, otherwise {@code false}
      */
     @Deprecated
     public static boolean isErrorEnabled() {
@@ -91,21 +85,33 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#isDebugEnabled()}.
      *             Functionality of this method is delegated there.
+     * @return {@code true} if logging is enabed, otherwise {@code false}
      */
     @Deprecated
     public static boolean isDebugEnabled() {
         return Logger.isDebugEnabled();
     }
 
-    public static void setDebugEnabled(boolean enabled) {
+    public static void setDebugEnabled(final boolean enabled) {
+        debugEnabled = enabled;
+        setLogLevel();
+    }
+
+    public static void setTraceEnabled(final boolean enabled) {
+        traceEnabled = enabled;
+        setLogLevel();
+    }
+
+    private static void setLogLevel() {
         // SLF4J doesn't provide a hook into the logging implementation. We'll have to do this 'direct', bypassing slf4j.
         final org.apache.logging.log4j.Level newLevel;
-        if (enabled) {
-            newLevel = org.apache.logging.log4j.Level.ALL;
+        if (traceEnabled) {
+            newLevel = org.apache.logging.log4j.Level.TRACE;
+        } else if (debugEnabled) {
+            newLevel = org.apache.logging.log4j.Level.DEBUG;
         } else {
             newLevel = org.apache.logging.log4j.Level.INFO;
         }
-
         final LoggerContext ctx = (LoggerContext) LogManager.getContext( false );
         final Configuration config = ctx.getConfiguration();
         final LoggerConfig loggerConfig = config.getLoggerConfig( LogManager.ROOT_LOGGER_NAME );
@@ -116,6 +122,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#isInfoEnabled()}.
      *             Functionality of this method is delegated there.
+     * @return {@code true} if logging is enabed, otherwise {@code false}
      */
     @Deprecated
     public static boolean isInfoEnabled() {
@@ -125,6 +132,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#isWarnEnabled()}.
      *             Functionality of this method is delegated there.
+     * @return {@code true} if logging is enabed, otherwise {@code false}
      */
     @Deprecated
     public static boolean isWarnEnabled() {
@@ -134,6 +142,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#debug(String)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
      */
     @Deprecated
     public static void debug(String s) {
@@ -145,6 +154,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#debug(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void debug(Throwable throwable) {
@@ -156,6 +166,8 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#debug(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void debug(String s, Throwable throwable) {
@@ -178,6 +190,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#info(String)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
      */
     @Deprecated
     public static void info(String s) {
@@ -189,6 +202,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#info(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void info(Throwable throwable) {
@@ -200,6 +214,8 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#info(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void info(String s, Throwable throwable) {
@@ -222,6 +238,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#warn(String)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
      */
     @Deprecated
     public static void warn(String s) {
@@ -233,6 +250,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#warn(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void warn(Throwable throwable) {
@@ -244,6 +262,8 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#debug(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void warn(String s, Throwable throwable) {
@@ -266,6 +286,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#error(String)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
      */
     @Deprecated
     public static void error(String s) {
@@ -280,6 +301,7 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#error(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void error(Throwable throwable) {
@@ -294,6 +316,8 @@ public class Log {
     /**
      * @deprecated replaced by {@link org.slf4j.Logger#error(String, Throwable)}.
      *             Functionality of this method is delegated there.
+     * @param s the string to log
+     * @param throwable the throwable to log
      */
     @Deprecated
     public static void error(String s, Throwable throwable) {

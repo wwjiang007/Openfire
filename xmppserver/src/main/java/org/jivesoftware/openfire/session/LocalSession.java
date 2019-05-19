@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
-
 import javax.net.ssl.SSLSession;
 
 import org.jivesoftware.openfire.Connection;
@@ -64,7 +63,6 @@ public abstract class LocalSession implements Session {
      * The Address this session is authenticated as.
      */
     private JID address;
-
     /**
      * The stream id for this session (random and unique).
      */
@@ -95,6 +93,11 @@ public abstract class LocalSession implements Session {
      * finishes.
      */
     private final Map<String, Object> sessionData = new HashMap<>();
+
+    /**
+     * Software Version (XEP-0092) data as obtained from the peer on this connection.
+     */
+    private Map<String, String> softwareVersionData = new HashMap<>();
 
     /**
      * XEP-0198 Stream Manager
@@ -148,6 +151,8 @@ public abstract class LocalSession implements Session {
      * Reattach the session to a new connection. The connection must already be
      * initialized as a running XML Stream, normally by having run through XEP-0198
      * resumption.
+     * @param connection The connection to attach the session to
+     * @param h the sequence number of the last handled stanza sent over the former stream
      */
     public void reattach(Connection connection, long h) {
         Connection temp = this.conn;
@@ -423,7 +428,7 @@ public abstract class LocalSession implements Session {
      * Returns a text with the available stream features. Each subclass may return different
      * values depending whether the session has been authenticated or not.
      *
-     * @return a text with the available stream features or <tt>null</tt> to add nothing.
+     * @return a text with the available stream features or {@code null} to add nothing.
      */
     public abstract String getAvailableStreamFeatures();
 
@@ -517,4 +522,24 @@ public abstract class LocalSession implements Session {
     public final Locale getLanguage() {
         return language;
     }
+
+    /**
+     * Retrieves Software Version data. This method gives access to temporary Software Version data only. 
+     * @return a Map collection value of data .
+     */
+    @Override
+    public Map<String, String> getSoftwareVersion() {
+        return softwareVersionData; 
+    }
+
+    /**
+     * Saves given session data. Data is saved to temporary storage only and is accessible during
+     * this session life only and only from this session instance.
+     * @param key a <code>String</code> value of stored data key ID.
+     * @param value a <code>String</code> value of data stored in session.
+     */
+    public void setSoftwareVersionData(String key, String value) {
+        softwareVersionData.put(key, value);
+    }
+
 }

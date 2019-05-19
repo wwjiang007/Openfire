@@ -16,31 +16,23 @@
 
 package org.jivesoftware.openfire.http;
 
-import java.io.*;
-import java.net.InetAddress;
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
-import java.security.cert.X509Certificate;
-import java.util.Date;
+import org.apache.commons.text.StringEscapeUtils;
+import org.dom4j.DocumentHelper;
+import org.dom4j.Element;
+import org.dom4j.QName;
+import org.jivesoftware.openfire.auth.UnauthorizedException;
+import org.jivesoftware.util.JiveGlobals;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.servlet.*;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-
-import org.apache.commons.text.StringEscapeUtils;
-import org.dom4j.Document;
-import org.dom4j.DocumentHelper;
-import org.dom4j.Element;
-import org.dom4j.QName;
-import org.dom4j.io.XMPPPacketReader;
-import org.jivesoftware.openfire.auth.UnauthorizedException;
-import org.jivesoftware.openfire.net.MXParser;
-import org.jivesoftware.util.JiveGlobals;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.xmlpull.v1.XmlPullParserException;
-import org.xmlpull.v1.XmlPullParserFactory;
+import java.io.*;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Date;
 
 /**
  * Servlet which handles requests to the HTTP binding service. It determines if there is currently
@@ -56,19 +48,6 @@ public class HttpBindServlet extends HttpServlet {
 
     private HttpSessionManager sessionManager;
     private HttpBindManager boshManager;
-
-    private static XmlPullParserFactory factory;
-
-    static {
-        try {
-            factory = XmlPullParserFactory.newInstance(MXParser.class.getName(), null);
-        }
-        catch (XmlPullParserException e) {
-            Log.error("Error creating a parser factory", e);
-        }
-    }
-
-    private ThreadLocal<XMPPPacketReader> localReader = new ThreadLocal<>();
 
     public HttpBindServlet() {
     }
@@ -158,41 +137,27 @@ public class HttpBindServlet extends HttpServlet {
             throws IOException {
         final String remoteAddress = getRemoteAddress(context);
 
-        // Parse document from the content.
-        Document document;
+        final HttpBindBody body;
         try {
-            document = getPacketReader().read(new StringReader(content), "UTF-8");
+            body = HttpBindBody.from( content );
         } catch (Exception ex) {
             Log.warn("Error parsing request data from [" + remoteAddress + "]", ex);
             sendLegacyError(context, BoshBindingError.badRequest);
             return;
         }
-        if (document == null) {
-            Log.info("The result of parsing request data from [" + remoteAddress + "] was a null-object.");
-            sendLegacyError(context, BoshBindingError.badRequest);
-            return;
-        }
 
-        final Element node = document.getRootElement();
-        if (node == null || !"body".equals(node.getName())) {
-            Log.info("Root element 'body' is missing from parsed request data from [" + remoteAddress + "]");
-            sendLegacyError(context, BoshBindingError.badRequest);
-            return;
-        }
-
-        final long rid = getLongAttribute(node.attributeValue("rid"), -1);
-        if (rid <= 0) {
+        final Long rid = body.getRid();
+        if (rid == null || rid <= 0) {
             Log.info("Root element 'body' does not contain a valid RID attribute value in parsed request data from [" + remoteAddress + "]");
             sendLegacyError(context, BoshBindingError.badRequest, "Body-element is missing a RID (Request ID) value, or the provided value is a non-positive integer.");
             return;
         }
 
         // Process the parsed document.
-        final String sid = node.attributeValue("sid");
-        if (sid == null) {
+        if (body.getSid() == null) {
             // When there's no Session ID, this should be a request to create a new session. If there's additional content,
             // something is wrong.
-            if (node.elements().size() > 0) {
+            if (!body.isEmpty()) {
                 // invalid session request; missing sid
                 Log.info("Root element 'body' does not contain a SID attribute value in parsed request data from [" + remoteAddress + "]");
                 sendLegacyError(context, BoshBindingError.badRequest);
@@ -200,27 +165,30 @@ public class HttpBindServlet extends HttpServlet {
             }
 
             // We have a new session
-            createNewSession(context, node);
+            createNewSession(context, body);
         }
         else {
             // When there exists a Session ID, new data for an existing session is being provided.
-            handleSessionRequest(sid, context, node);
+            handleSessionRequest(context, body);
         }
     }
 
-    protected void createNewSession(AsyncContext context, Element rootNode)
+    protected void createNewSession(AsyncContext context, HttpBindBody body)
             throws IOException
     {
-        final long rid = getLongAttribute(rootNode.attributeValue("rid"), -1);
+        final long rid = body.getRid();
 
         try {
-            final X509Certificate[] certificates = (X509Certificate[]) context.getRequest().getAttribute("javax.servlet.request.X509Certificate");
-            final HttpConnection connection = new HttpConnection(rid, context.getRequest().isSecure(), certificates, context);
-            final InetAddress address = InetAddress.getByName(context.getRequest().getRemoteAddr());
-            connection.setSession(sessionManager.createSession(address, rootNode, connection));
+            final HttpConnection connection = new HttpConnection(rid, context);
+
+            SessionEventDispatcher.dispatchEvent( null, SessionEventDispatcher.EventType.pre_session_created, connection, context );
+
+            connection.setSession(sessionManager.createSession(body, connection));
             if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
-                Log.info(new Date() + ": HTTP RECV(" + connection.getSession().getStreamID().getID() + "): " + rootNode.asXML());
+                Log.info("HTTP RECV(" + connection.getSession().getStreamID().getID() + "): " + body.asXML());
             }
+
+            SessionEventDispatcher.dispatchEvent( connection.getSession(), SessionEventDispatcher.EventType.post_session_created, connection, context );
         }
         catch (UnauthorizedException | HttpBindException e) {
             // Server wasn't initialized yet.
@@ -228,11 +196,12 @@ public class HttpBindServlet extends HttpServlet {
         }
     }
 
-    private void handleSessionRequest(String sid, AsyncContext context, Element rootNode)
+    private void handleSessionRequest(AsyncContext context, HttpBindBody body)
             throws IOException
     {
+        final String sid = body.getSid();
         if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
-            Log.info(new Date() + ": HTTP RECV(" + sid + "): " + rootNode.asXML());
+            Log.info("HTTP RECV(" + sid + "): " + body.asXML());
         }
 
         HttpSession session = sessionManager.getSession(sid);
@@ -245,11 +214,9 @@ public class HttpBindServlet extends HttpServlet {
             return;
         }
 
-        final long rid = getLongAttribute(rootNode.attributeValue("rid"), -1);
-
         synchronized (session) {
             try {
-                session.forwardRequest(rid, context.getRequest().isSecure(), rootNode, context);
+                session.forwardRequest(body, context);
             }
             catch (HttpBindException e) {
                 sendError(session, context, e.getBindingError());
@@ -259,18 +226,6 @@ public class HttpBindServlet extends HttpServlet {
                 context.complete();
             }
         }
-    }
-
-    private XMPPPacketReader getPacketReader()
-    {
-        // Reader is associated with a new XMPPPacketReader
-        XMPPPacketReader reader = localReader.get();
-        if (reader == null) {
-            reader = new XMPPPacketReader();
-            reader.setXPPFactory(factory);
-            localReader.set(reader);
-        }
-        return reader;
     }
 
     public static void respond(HttpSession session, AsyncContext context, String content, boolean async) throws IOException
@@ -293,7 +248,7 @@ public class HttpBindServlet extends HttpServlet {
         }
         
         if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
-            System.out.println(new Date() + ": HTTP SENT(" + session.getStreamID().getID() + "): " + content);
+            Log.info("HTTP SENT(" + session.getStreamID().getID() + "): " + content);
         }
 
         final byte[] byteContent = content.getBytes(StandardCharsets.UTF_8);
@@ -314,7 +269,7 @@ public class HttpBindServlet extends HttpServlet {
             throws IOException
     {
         if (JiveGlobals.getBooleanProperty("log.httpbind.enabled", false)) {
-            System.out.println(new Date() + ": HTTP ERR(" + session.getStreamID().getID() + "): " + bindingError.getErrorType().getType() + ", " + bindingError.getCondition() + ".");
+            Log.info("HTTP ERR(" + session.getStreamID().getID() + "): " + bindingError.getErrorType().getType() + ", " + bindingError.getCondition() + ".");
         }
         try {
             if ((session.getMajorVersion() == 1 && session.getMinorVersion() >= 6) || session.getMajorVersion() > 1)
@@ -358,30 +313,6 @@ public class HttpBindServlet extends HttpServlet {
         return body.asXML();
     }
 
-    protected static long getLongAttribute(String value, long defaultValue) {
-        if (value == null || "".equals(value)) {
-            return defaultValue;
-        }
-        try {
-            return Long.valueOf(value);
-        }
-        catch (Exception ex) {
-            return defaultValue;
-        }
-    }
-
-    protected static int getIntAttribute(String value, int defaultValue) {
-        if (value == null || "".equals(value)) {
-            return defaultValue;
-        }
-        try {
-            return Integer.valueOf(value);
-        }
-        catch (Exception ex) {
-            return defaultValue;
-        }
-    }
-
     protected static String getRemoteAddress(AsyncContext context)
     {
         String remoteAddress = null;
@@ -409,7 +340,9 @@ public class HttpBindServlet extends HttpServlet {
 
         @Override
         public void onDataAvailable() throws IOException {
-            Log.trace("Data is available to be read from [" + remoteAddress + "]");
+            if( Log.isTraceEnabled() ) {
+                Log.trace("Data is available to be read from [" + remoteAddress + "]");
+            }
 
             final ServletInputStream inputStream = context.getRequest().getInputStream();
 
@@ -422,13 +355,17 @@ public class HttpBindServlet extends HttpServlet {
 
         @Override
         public void onAllDataRead() throws IOException {
-            Log.trace("All data has been read from [" + remoteAddress + "]");
+            if( Log.isTraceEnabled() ) {
+                Log.trace("All data has been read from [" + remoteAddress + "]");
+            }
             processContent(context, outStream.toString(StandardCharsets.UTF_8.name()));
         }
 
         @Override
         public void onError(Throwable throwable) {
-            Log.warn("Error reading request data from [" + remoteAddress + "]", throwable);
+            if( Log.isWarnEnabled() ) {
+                Log.warn("Error reading request data from [" + remoteAddress + "]", throwable);
+            }
             try {
                 sendLegacyError(context, BoshBindingError.badRequest);
             } catch (IOException ex) {
@@ -454,7 +391,9 @@ public class HttpBindServlet extends HttpServlet {
             // This method may be invoked multiple times and by different threads, e.g. when writing large byte arrays.
             // Make sure a write/complete operation is only done, if no other write is pending, i.e. if isReady() == true
             // Otherwise WritePendingException is thrown.
-            Log.trace("Data can be written to [" + remoteAddress + "]");
+            if( Log.isTraceEnabled() ) {
+                Log.trace("Data can be written to [" + remoteAddress + "]");
+            }
             synchronized ( context )
             {
                 final ServletOutputStream servletOutputStream = context.getResponse().getOutputStream();
@@ -481,7 +420,9 @@ public class HttpBindServlet extends HttpServlet {
 
         @Override
         public void onError(Throwable throwable) {
-            Log.warn("Error writing response data to [" + remoteAddress + "]", throwable);
+            if( Log.isWarnEnabled() ) {
+                Log.warn("Error writing response data to [" + remoteAddress + "]", throwable);
+            }
             synchronized ( context )
             {
                 context.complete();

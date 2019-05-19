@@ -16,16 +16,6 @@
 
 package org.jivesoftware.openfire.http;
 
-import java.io.IOException;
-import java.net.InetAddress;
-import java.util.Locale;
-import java.util.Map;
-import java.util.TimerTask;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-
 import org.dom4j.DocumentException;
 import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
@@ -40,7 +30,17 @@ import org.jivesoftware.util.TaskEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.servlet.AsyncContext;
 import javax.xml.XMLConstants;
+import java.io.IOException;
+import java.net.UnknownHostException;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Manages sessions for all users connecting to Openfire using the HTTP binding protocol,
@@ -56,14 +56,6 @@ public class HttpSessionManager {
     private TimerTask inactivityTask;
     private ThreadPoolExecutor sendPacketPool;
     private SessionListener sessionListener = new SessionListener() {
-        @Override
-        public void connectionOpened(HttpSession session, HttpConnection connection) {
-        }
-
-        @Override
-        public void connectionClosed(HttpSession session, HttpConnection connection) {
-        }
-
         @Override
         public void sessionClosed(HttpSession session) {
             sessionMap.remove(session.getStreamID().getID());
@@ -108,6 +100,7 @@ public class HttpSessionManager {
         final int maxClientPoolSize = JiveGlobals.getIntProperty( "xmpp.client.processing.threads", 8 );
         final int maxPoolSize = JiveGlobals.getIntProperty("xmpp.httpbind.worker.threads", maxClientPoolSize );
         final int keepAlive = JiveGlobals.getIntProperty( "xmpp.httpbind.worker.timeout", 60 );
+        final int sessionCleanupCheck = JiveGlobals.getIntProperty("xmpp.httpbind.worker.cleanupcheck", 30);
 
         sendPacketPool = new ThreadPoolExecutor(getCorePoolSize(maxPoolSize), maxPoolSize, keepAlive, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(), // unbounded task queue
@@ -118,7 +111,7 @@ public class HttpSessionManager {
 
         // Periodically check for Sessions that need a cleanup.
         inactivityTask = new HttpSessionReaper();
-        TaskEngine.getInstance().schedule( inactivityTask, 30 * JiveConstants.SECOND, 30 * JiveConstants.SECOND );
+        TaskEngine.getInstance().schedule( inactivityTask, 30 * JiveConstants.SECOND, sessionCleanupCheck * JiveConstants.SECOND);
     }
 
     /**
@@ -148,8 +141,7 @@ public class HttpSessionManager {
     /**
      * Creates an HTTP binding session which will allow a user to exchange packets with Openfire.
      *
-     * @param address the internet address that was used to bind to Openfire.
-     * @param rootNode the body element that was sent containing the request for a new session.
+     * @param body the body element that was sent containing the request for a new session.
      * @param connection the HTTP connection object which abstracts the individual connections to
      * Openfire over the HTTP binding protocol. The initial session creation response is returned to
      * this connection.
@@ -159,29 +151,15 @@ public class HttpSessionManager {
      * Either shutting down or starting up.
      * @throws HttpBindException when there is an internal server error related to the creation of
      * the initial session creation response.
+     * @throws UnknownHostException if no IP address for the peer could be found
      */
-    public HttpSession createSession(InetAddress address, Element rootNode,
-                                     HttpConnection connection)
-            throws UnauthorizedException, HttpBindException {
+    public HttpSession createSession(HttpBindBody body, HttpConnection connection)
+        throws UnauthorizedException, HttpBindException, UnknownHostException
+    {
         // TODO Check if IP address is allowed to connect to the server
-
-        // Default language is English ("en").
-        String language = rootNode.attributeValue(QName.get("lang", XMLConstants.XML_NS_URI));
-        if (language == null || "".equals(language)) {
-            language = "en";
-        }
-
-        int wait = getIntAttribute(rootNode.attributeValue("wait"), 60);
-        int hold = getIntAttribute(rootNode.attributeValue("hold"), 1);
-        
-        String version = rootNode.attributeValue("ver");
-        if (version == null || "".equals(version)) {
-            version = "1.5";
-        }
-
-        HttpSession session = createSession(connection.getRequestId(), address, connection, Locale.forLanguageTag(language));
-        session.setWait(Math.min(wait, getMaxWait()));
-        session.setHold(hold);
+        HttpSession session = createSession(connection, Locale.forLanguageTag(body.getLanguage()));
+        session.setWait(Math.min(body.getWait(), getMaxWait()));
+        session.setHold(body.getHold());
         session.setSecure(connection.isSecure());
         session.setMaxPollingInterval(getPollingInterval());
         session.setMaxRequests(getMaxRequests());
@@ -195,9 +173,8 @@ public class HttpSessionManager {
         }
         session.resetInactivityTimeout();
         
-        String [] versionString = version.split("\\.");
-        session.setMajorVersion(Integer.parseInt(versionString[0]));
-        session.setMinorVersion(Integer.parseInt(versionString[1]));
+        session.setMajorVersion(body.getMajorVersion());
+        session.setMinorVersion(body.getMinorVersion());
 
         connection.setSession(session);
         try {
@@ -291,14 +268,15 @@ public class HttpSessionManager {
         return JiveGlobals.getIntProperty("xmpp.httpbind.client.idle.polling", 60);
     }
 
-    private HttpSession createSession(long rid, InetAddress address, HttpConnection connection, Locale language) throws UnauthorizedException {
+    private HttpSession createSession(HttpConnection connection, Locale language) throws UnauthorizedException, UnknownHostException
+    {
         // Create a ClientSession for this user.
         StreamID streamID = SessionManager.getInstance().nextStreamID();
         // Send to the server that a new client session has been created
-        HttpSession session = sessionManager.createClientHttpSession(rid, address, streamID, connection, language);
+        HttpSession session = sessionManager.createClientHttpSession(streamID, connection, language);
         // Register that the new session is associated with the specified stream ID
         sessionMap.put(streamID.getID(), session);
-        session.addSessionCloseListener(sessionListener);
+        SessionEventDispatcher.addListener( sessionListener );
         return session;
     }
 
@@ -346,15 +324,25 @@ public class HttpSessionManager {
 
         @Override
         public void run() {
+            boolean logHttpbindEnabled = JiveGlobals.getBooleanProperty("log.httpbind.enabled", false);
             long currentTime = System.currentTimeMillis();
             for (HttpSession session : sessionMap.values()) {
                 try {
                     long lastActive = currentTime - session.getLastActivity();
-                    if (Log.isDebugEnabled()) {
-                        Log.debug("Session was last active {} ms ago: {}", lastActive, session );
+                    if( lastActive >= 1 && logHttpbindEnabled && Log.isInfoEnabled()) {
+                        Log.info("Session {} was last active {} ms ago: {} from IP {} " +
+                                " currently on rid {}",
+                                session.getStreamID(),
+                                lastActive,
+                                session.getAddress(), // JID
+                                session.getConnection().getHostAddress(),
+                                session.getLastAcknowledged()); // RID
                     }
                     if (lastActive > session.getInactivityTimeout() * JiveConstants.SECOND) {
-                        Log.info("Closing idle session: {}", session);
+                        Log.info("Closing idle session {}: {} from IP {}",
+                                session.getStreamID(),
+                                session.getAddress(),
+                                session.getConnection().getHostAddress());
                         session.close();
                     }
                 } catch (Exception e) {

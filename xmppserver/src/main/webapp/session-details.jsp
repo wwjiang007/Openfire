@@ -34,7 +34,8 @@
 <%@ page import="org.jivesoftware.openfire.websocket.WebSocketConnection" %>
 <%@ page import="org.jivesoftware.openfire.http.HttpConnection" %>
 <%@ page import="org.jivesoftware.openfire.http.HttpSession" %>
-
+<%@ page import="java.util.Map" %>
+<%@ page import="java.util.TreeMap" %>
 <%@ taglib uri="http://java.sun.com/jsp/jstl/core" prefix="c" %>
 <%@ taglib uri="http://java.sun.com/jsp/jstl/fmt" prefix="fmt" %>
 <%@ taglib uri="http://java.sun.com/jsp/jstl/functions" prefix="fn" %>
@@ -356,11 +357,46 @@
             Invalid session/connection
                 <% }
             } %>
+        </td>
     </tr>
 </tbody>
 </table>
 </div>
 
+<br>
+<%  // Show Software Version if there is :
+    if (!currentSess.getSoftwareVersion().isEmpty()) {
+%>
+    <div class="jive-table">
+        <table cellpadding="3" cellspacing="1" border="0" width="100%">
+            <thead>
+                <tr>
+                    <th colspan="2">
+                        <fmt:message key="session.details.software_version"/>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <% 
+                    Map<String, String> treeMap = new TreeMap<String, String>(currentSess.getSoftwareVersion());
+                    for (Map.Entry<String, String> entry : treeMap.entrySet()){ %>
+                        <tr>
+                            <td class="c1">
+                                <%= StringUtils.escapeHTMLTags(entry.getKey().substring(0, 1).toUpperCase()+""+entry.getKey().substring(1)) %>:
+                            </td>
+                            <td>
+                                <%= StringUtils.escapeHTMLTags(entry.getValue())%>
+                            </td>
+                        </tr>
+                    <% 
+                    }
+                %>
+            </tbody>
+        </table>
+    </div>
+<%  } %>
+
+<br>
 <%  // Show a list of multiple user sessions if there is more than 1 session:
     if (sessionCount > 1) {
 %>

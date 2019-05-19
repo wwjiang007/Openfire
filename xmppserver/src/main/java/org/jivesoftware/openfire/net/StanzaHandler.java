@@ -38,6 +38,7 @@ import org.xmpp.packet.*;
 
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.List;
 
 /**
  * A StanzaHandler is the main responsible for handling incoming stanzas. Some stanzas like startTLS
@@ -109,7 +110,6 @@ public abstract class StanzaHandler {
     }
 
     public void process(String stanza, XMPPPacketReader reader) throws Exception {
-
         boolean initialStream = stanza.startsWith("<stream:stream") || stanza.startsWith("<flash:stream");
         if (!sessionCreated || initialStream) {
             if (!initialStream) {
@@ -325,6 +325,18 @@ public abstract class StanzaHandler {
         Element query = doc.element("query");
         if (query != null && "jabber:iq:roster".equals(query.getNamespaceURI())) {
             return new Roster(doc);
+        }else if (query != null && "jabber:iq:version".equals(query.getNamespaceURI())) {
+            try {
+                List<Element> elements =  query.elements();
+                if (elements.size() >0){
+                    for (Element element : elements){
+                        session.setSoftwareVersionData(element.getName(), element.getStringValue());
+                    }
+                }    
+            } catch (Exception e) {
+                Log.error(e.getMessage(), e);
+            }
+            return new IQ(doc, !validateJIDs());
         }
         else {
             return new IQ(doc, !validateJIDs());
@@ -613,6 +625,9 @@ public abstract class StanzaHandler {
      * If the connection remains open, the XPP will be set to be ready for the
      * first packet. A call to next() should result in an START_TAG state with
      * the first packet in the stream.
+     * @param xpp the pull parser
+     * @throws XmlPullParserException if an exception occurs reading from the pull parser
+     * @throws IOException if an IO exception occurs reading from the pull parser
      */
     protected void createSession(XmlPullParser xpp) throws XmlPullParserException, IOException {
         for (int eventType = xpp.getEventType(); eventType != XmlPullParser.START_TAG;) {
@@ -694,7 +709,7 @@ public abstract class StanzaHandler {
      *
      * Note that the value that is returned for this method can
      * change over time. For example, if no session has been established yet,
-     * this method will return <tt>null</tt>, or, if resource binding occurs,
+     * this method will return {@code null}, or, if resource binding occurs,
      * the returned value might change. Values obtained from this method are
      * therefore best <em>not</em> cached.
      *

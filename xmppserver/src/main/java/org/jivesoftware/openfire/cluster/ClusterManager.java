@@ -19,12 +19,15 @@ package org.jivesoftware.openfire.cluster;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 
 import org.jivesoftware.openfire.XMPPServer;
+import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.util.JiveGlobals;
 import org.jivesoftware.util.JiveProperties;
 import org.jivesoftware.util.PropertyEventDispatcher;
@@ -172,7 +175,7 @@ public class ClusterManager {
     /**
      * Triggers event indicating that this JVM is now part of a cluster. At this point the
      * {@link org.jivesoftware.openfire.XMPPServer#getNodeID()} holds the new nodeID value and
-     * the old nodeID value is passed in case the listener needs it.<p>
+     * the old nodeID value is passed in case the listener needs it.
      * <p>
      * When joining the cluster as the senior cluster member the {@link #fireMarkedAsSeniorClusterMember()}
      * event will be sent right after this event.
@@ -230,7 +233,7 @@ public class ClusterManager {
      *
      * Moreover, if we were in a "split brain" scenario (ie. separated cluster islands) and the
      * island were this JVM belonged was marked as "old" then all nodes of that island will
-     * get the <tt>left cluster event</tt> and <tt>joined cluster events</tt>. That means that
+     * get the {@code left cluster event} and {@code joined cluster events}. That means that
      * caches will be reset and thus will need to be repopulated again with fresh data from this JVM.
      * This also includes the case where this JVM was the senior cluster member and when the islands
      * met again then this JVM stopped being the senior member.
@@ -289,7 +292,7 @@ public class ClusterManager {
 
     /**
      * Starts the cluster service if clustering is enabled. The process of starting clustering
-     * will recreate caches as distributed caches.<p>
+     * will recreate caches as distributed caches.
      */
     public static synchronized void startup() {
         if (isClusteringEnabled() && !isClusteringStarted()) {
@@ -385,6 +388,8 @@ public class ClusterManager {
      * tasks that should only be run on a single member in a cluster.
      *
      * @return true if this cluster member is the senior or if clustering is not enabled.
+     * <p><strong>Important:</strong> If clustering is enabled but has not yet started, this may return an incorrect result</p>
+     * @see #isSeniorClusterMemberOrNotClustered()
      */
     public static boolean isSeniorClusterMember() {
         return CacheFactory.isSeniorClusterMember();
@@ -399,6 +404,30 @@ public class ClusterManager {
      */
     public static Collection<ClusterNodeInfo> getNodesInfo() {
         return CacheFactory.getClusterNodesInfo();
+    }
+
+    /**
+     * Returns basic information about a specific member of the cluster.
+     *
+     * @since Openfire 4.4
+     * @param nodeID the node whose information is required
+     * @return the node specific information, or {@link Optional#empty()} if the node could not be identified
+     */
+    public static Optional<ClusterNodeInfo> getNodeInfo(final byte[] nodeID) {
+        return getNodeInfo(NodeID.getInstance(nodeID));
+    }
+
+    /**
+     * Returns basic information about a specific member of the cluster.
+     *
+     * @since Openfire 4.4
+     * @param nodeID the node whose information is required
+     * @return the node specific information, or {@link Optional#empty()} if the node could not be identified
+     */
+    public static Optional<ClusterNodeInfo> getNodeInfo(final NodeID nodeID) {
+        return CacheFactory.getClusterNodesInfo().stream()
+            .filter(nodeInfo -> nodeInfo.getNodeID().equals(nodeID))
+            .findAny();
     }
 
     /**
@@ -442,6 +471,87 @@ public class ClusterManager {
         }
         return false;
     }
+
+    /**
+     * If clustering is enabled, this method will wait until clustering is fully started.<br>
+     * If clustering is not enabled, this method will return immediately.
+     * <p><strong>Important:</strong> because this method blocks the current thread, it must not be called from a plugin
+     * constructor or {@link Plugin#initializePlugin(org.jivesoftware.openfire.container.PluginManager, java.io.File)}.
+     * This is because the Hazelcast clustering plugin waits until all plugins have initialised before starting, so a
+     * plugin cannot wait until clustering has started during initialisation.</p>
+     *
+     * @throws InterruptedException if the thread is interrupted whilst waiting for clustering to start
+     * @since Openfire 4.3.0
+     */
+    @SuppressWarnings("WeakerAccess")
+    public static void waitForClusteringToStart() throws InterruptedException {
+        if (!ClusterManager.isClusteringEnabled()) {
+            // Clustering is not enabled, so return immediately
+            return;
+        }
+
+        final Semaphore semaphore = new Semaphore(0);
+        final ClusterEventListener listener = new ClusterEventListener() {
+            @Override
+            public void joinedCluster() {
+                semaphore.release();
+            }
+
+            @Override
+            public void joinedCluster(final byte[] nodeID) {
+                // Not required
+            }
+
+            @Override
+            public void leftCluster() {
+                // Not required
+            }
+
+            @Override
+            public void leftCluster(final byte[] nodeID) {
+                // Not required
+            }
+
+            @Override
+            public void markedAsSeniorClusterMember() {
+                // Not required
+            }
+        };
+
+        ClusterManager.addListener(listener);
+        try {
+            if (!ClusterManager.isClusteringStarted()) {
+                // We need to wait for the joinedCluster() event
+                semaphore.acquire();
+            }
+        } finally {
+            ClusterManager.removeListener(listener);
+        }
+    }
+
+    /**
+     * Returns true if this member is the senior member in the cluster. If clustering
+     * is not enabled, this method will also return true. This test is useful for
+     * tasks that should only be run on a single member in a cluster. Unlike {@link #isSeniorClusterMember()} this method
+     * will block, if necessary, until clustering has completed initialisation. For that reason, do not call in a
+     * plugin creation or initialisation stage.
+     *
+     * @return true if this cluster member is the senior or if clustering is not enabled.
+     * @see #isSeniorClusterMember()
+     * @since Openfire 4.3.0
+     */
+    @SuppressWarnings({"unused", "WeakerAccess"})
+    public static boolean isSeniorClusterMemberOrNotClustered() {
+        try {
+            ClusterManager.waitForClusteringToStart();
+            return ClusterManager.isSeniorClusterMember();
+        } catch (final InterruptedException ignored) {
+            // We were interrupted before clustering started. Re-interrupt the thread, and return false.
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
 
     private static class Event {
         private EventType type;

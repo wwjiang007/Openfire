@@ -24,6 +24,7 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.StringTokenizer;
 
 import org.jivesoftware.openfire.PresenceManager;
@@ -63,6 +64,7 @@ public class WebManager extends WebBean {
 
     /**
      * Invalidates and recreates session (do this on login/logout).
+     * @return the new HTTP session
      */
     public HttpSession invalidateSession() {
         session.invalidate();
@@ -71,21 +73,21 @@ public class WebManager extends WebBean {
     }
 
     /**
-     * Returns the auth token redirects to the login page if an auth token is not found.
+     * @return the auth token; redirect to the login page if an auth token is not found.
      */
     public AuthToken getAuthToken() {
         return (AuthToken)session.getAttribute("jive.admin.authToken");
     }
 
     /**
-     * Returns <tt>true</tt> if the Openfire container is in setup mode, <tt>false</tt> otherwise.
+     * @return {@code true} if the Openfire container is in setup mode, {@code false} otherwise.
      */
     public boolean isSetupMode() {
         return getXMPPServer().isSetupMode();
     }
 
     /**
-     * Returns the XMPP server object -- can get many config items from here.
+     * @return the XMPP server object -- can get many config items from here.
      */
     public XMPPServer getXMPPServer() {
         final XMPPServer xmppServer = XMPPServer.getInstance();
@@ -152,7 +154,7 @@ public class WebManager extends WebBean {
     }
 
     /**
-     * Returns the page user or <tt>null</tt> if one is not found.
+     * @return the page user or {@code null} if one is not found.
      */
     public User getUser() {
         User pageUser = null;
@@ -162,6 +164,9 @@ public class WebManager extends WebBean {
             {
                 Log.debug( "Unable to get user: no auth token on session." );
                 return null;
+            }
+            if (authToken instanceof AuthToken.OneTimeAuthToken) {
+                return new User(authToken.getUsername(), "Recovery via One Time Auth Token", null, new Date(), new Date());
             }
             final String username = authToken.getUsername();
             if (username == null || username.isEmpty())
@@ -178,7 +183,7 @@ public class WebManager extends WebBean {
     }
 
     /**
-     * Returns <tt>true</tt> if the server is in embedded mode, <tt>false</tt> otherwise.
+     * @return {@code true} if the server is in embedded mode, {@code false} otherwise.
      */
     public boolean isEmbedded() {
         try {
@@ -272,6 +277,9 @@ public class WebManager extends WebBean {
 
     /**
      * Copies the contents at <CODE>src</CODE> to <CODE>dst</CODE>.
+     * @param src the source location
+     * @param dst the target location
+     * @throws IOException if the copy failed
      */
     public static void copy(URL src, File dst) throws IOException {
 
@@ -287,6 +295,9 @@ public class WebManager extends WebBean {
      * Common code for copy routines.  By convention, the streams are
      * closed in the same method in which they were opened.  Thus,
      * this method does not close the streams when the copying is done.
+     * @param in the input stream
+     * @param out the output stream
+     * @throws IOException if the copy failed
      */
     private static void copy(InputStream in, OutputStream out) throws IOException {
         byte[] buffer = new byte[4096];

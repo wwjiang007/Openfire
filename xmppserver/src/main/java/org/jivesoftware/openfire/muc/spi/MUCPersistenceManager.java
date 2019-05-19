@@ -25,22 +25,25 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.jivesoftware.database.DbConnectionManager;
+import org.jivesoftware.database.SequenceManager;
 import org.jivesoftware.openfire.PacketRouter;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.group.GroupJID;
 import org.jivesoftware.openfire.muc.*;
+import org.jivesoftware.util.JiveConstants;
 import org.jivesoftware.util.JiveGlobals;
+import org.jivesoftware.util.LinkedList;
 import org.jivesoftware.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xmpp.packet.JID;
 
 /**
- * A manager responsible for ensuring room persistence. There are different ways to make a room 
+ * A manager responsible for ensuring room persistence. There are different ways to make a room
  * persistent. The first attempt will be to save the room in a relation database. If for some reason
  * the room can't be saved in the database an alternative repository will be used to save the room
  * such as XML files.<p>
- * 
+ *
  * After the problem with the database has been solved, the information saved in the XML files will
  * be moved to the database.
  *
@@ -125,8 +128,7 @@ public class MUCPersistenceManager {
     private static final String DELETE_USER_MUCAFFILIATION =
         "DELETE FROM ofMucAffiliation WHERE jid=?";
     private static final String ADD_CONVERSATION_LOG =
-        "INSERT INTO ofMucConversationLog (roomID,messageID,sender,nickname,logTime,subject,body,stanza) " +
-        "SELECT ?,COUNT(*),?,?,?,?,?,? FROM ofMucConversationLog";
+        "INSERT INTO ofMucConversationLog (roomID,messageID,sender,nickname,logTime,subject,body,stanza) VALUES (?,?,?,?,?,?,?,?)";
 
     /* Map of subdomains to their associated properties */
     private static ConcurrentHashMap<String,MUCServiceProperties> propertyMaps = new ConcurrentHashMap<>();
@@ -1045,29 +1047,43 @@ public class MUCPersistenceManager {
     }
 
     /**
-     * Saves the conversation log entry to the database.
-     * 
-     * @param entry the ConversationLogEntry to save to the database.
-     * @return true if the ConversationLogEntry was saved successfully to the database.
+     * Saves the conversation log entry batch to the database.
+     *
+     * @param batch a list of ConversationLogEntry to save to the database.
+     * @return true if the batch was saved successfully to the database.
      */
-    public static boolean saveConversationLogEntry(ConversationLogEntry entry) {
+    public static boolean saveConversationLogBatch(List<ConversationLogEntry> batch) {
         Connection con = null;
         PreparedStatement pstmt = null;
+
         try {
             con = DbConnectionManager.getConnection();
             pstmt = con.prepareStatement(ADD_CONVERSATION_LOG);
-            pstmt.setLong(1, entry.getRoomID());
-            pstmt.setString(2, entry.getSender().toString());
-            pstmt.setString(3, entry.getNickname());
-            pstmt.setString(4, StringUtils.dateToMillis(entry.getDate()));
-            pstmt.setString(5, entry.getSubject());
-            pstmt.setString(6, entry.getBody());
-            pstmt.setString(7, entry.getStanza());
-            pstmt.executeUpdate();
+            con.setAutoCommit(false);
+
+            for(ConversationLogEntry entry : batch) {
+                pstmt.setLong(1, entry.getRoomID());
+                pstmt.setLong(2, SequenceManager.nextID(JiveConstants.MUC_MESSAGE_ID));
+                pstmt.setString(3, entry.getSender().toString());
+                pstmt.setString(4, entry.getNickname());
+                pstmt.setString(5, StringUtils.dateToMillis(entry.getDate()));
+                pstmt.setString(6, entry.getSubject());
+                pstmt.setString(7, entry.getBody());
+                pstmt.setString(8, entry.getStanza());
+                pstmt.addBatch();
+            }
+
+            pstmt.executeBatch();
+            con.commit();
             return true;
         }
         catch (SQLException sqle) {
-            Log.error("Error saving conversation log entry", sqle);
+            Log.error("Error saving conversation log batch", sqle);
+            if (con != null) {
+            	try {
+					con.rollback();
+				} catch (SQLException ignore) {}
+            }
             return false;
         }
         finally {
@@ -1108,7 +1124,7 @@ public class MUCPersistenceManager {
 
     /**
      * Returns a Jive property. If the specified property doesn't exist, the
-     * <tt>defaultValue</tt> will be returned.
+     * {@code defaultValue} will be returned.
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param name the name of the property to return.
@@ -1126,13 +1142,13 @@ public class MUCPersistenceManager {
 
     /**
      * Returns an integer value Jive property. If the specified property doesn't exist, the
-     * <tt>defaultValue</tt> will be returned.
+     * {@code defaultValue} will be returned.
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param name the name of the property to return.
      * @param defaultValue value returned if the property doesn't exist or was not
      *      a number.
-     * @return the property value specified by name or <tt>defaultValue</tt>.
+     * @return the property value specified by name or {@code defaultValue}.
      */
     public static int getIntProperty(String subdomain, String name, int defaultValue) {
         String value = getProperty(subdomain, name);
@@ -1149,13 +1165,13 @@ public class MUCPersistenceManager {
 
     /**
      * Returns a long value Jive property. If the specified property doesn't exist, the
-     * <tt>defaultValue</tt> will be returned.
+     * {@code defaultValue} will be returned.
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param name the name of the property to return.
      * @param defaultValue value returned if the property doesn't exist or was not
      *      a number.
-     * @return the property value specified by name or <tt>defaultValue</tt>.
+     * @return the property value specified by name or {@code defaultValue}.
      */
     public static long getLongProperty(String subdomain, String name, long defaultValue) {
         String value = getProperty(subdomain, name);
@@ -1175,25 +1191,25 @@ public class MUCPersistenceManager {
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param name the name of the property to return.
-     * @return true if the property value exists and is set to <tt>"true"</tt> (ignoring case).
-     *      Otherwise <tt>false</tt> is returned.
+     * @return true if the property value exists and is set to {@code "true"} (ignoring case).
+     *      Otherwise {@code false} is returned.
      */
     public static boolean getBooleanProperty(String subdomain, String name) {
         return Boolean.valueOf(getProperty(subdomain, name));
     }
 
     /**
-     * Returns a boolean value Jive property. If the property doesn't exist, the <tt>defaultValue</tt>
+     * Returns a boolean value Jive property. If the property doesn't exist, the {@code defaultValue}
      * will be returned.
      *
      * If the specified property can't be found, or if the value is not a number, the
-     * <tt>defaultValue</tt> will be returned.
+     * {@code defaultValue} will be returned.
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param name the name of the property to return.
      * @param defaultValue value returned if the property doesn't exist.
-     * @return true if the property value exists and is set to <tt>"true"</tt> (ignoring case).
-     *      Otherwise <tt>false</tt> is returned.
+     * @return true if the property value exists and is set to {@code "true"} (ignoring case).
+     *      Otherwise {@code false} is returned.
      */
     public static boolean getBooleanProperty(String subdomain, String name, boolean defaultValue) {
         String value = getProperty(subdomain, name);
@@ -1208,9 +1224,9 @@ public class MUCPersistenceManager {
     /**
      * Return all immediate children property names of a parent Jive property as a list of strings,
      * or an empty list if there are no children. For example, given
-     * the properties <tt>X.Y.A</tt>, <tt>X.Y.B</tt>, <tt>X.Y.C</tt> and <tt>X.Y.C.D</tt>, then
-     * the immediate child properties of <tt>X.Y</tt> are <tt>A</tt>, <tt>B</tt>, and
-     * <tt>C</tt> (<tt>C.D</tt> would not be returned using this method).<p>
+     * the properties {@code X.Y.A}, {@code X.Y.B}, {@code X.Y.C} and {@code X.Y.C.D}, then
+     * the immediate child properties of {@code X.Y} are {@code A}, {@code B}, and
+     * {@code C} ({@code C.D} would not be returned using this method).<p>
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param parent the root "node" of the properties to retrieve
@@ -1228,9 +1244,9 @@ public class MUCPersistenceManager {
     /**
      * Return all immediate children property values of a parent Jive property as a list of strings,
      * or an empty list if there are no children. For example, given
-     * the properties <tt>X.Y.A</tt>, <tt>X.Y.B</tt>, <tt>X.Y.C</tt> and <tt>X.Y.C.D</tt>, then
-     * the immediate child properties of <tt>X.Y</tt> are <tt>X.Y.A</tt>, <tt>X.Y.B</tt>, and
-     * <tt>X.Y.C</tt> (the value of <tt>X.Y.C.D</tt> would not be returned using this method).<p>
+     * the properties {@code X.Y.A}, {@code X.Y.B}, {@code X.Y.C} and {@code X.Y.C.D}, then
+     * the immediate child properties of {@code X.Y} are {@code X.Y.A}, {@code X.Y.B}, and
+     * {@code X.Y.C} (the value of {@code X.Y.C.D} would not be returned using this method).<p>
      *
      * @param subdomain the subdomain of the service to retrieve a property from
      * @param parent the name of the parent property to return the children for.
