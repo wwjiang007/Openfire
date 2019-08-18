@@ -17,12 +17,14 @@ package org.jivesoftware.util.cache;
 
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
 import org.jivesoftware.openfire.XMPPServer;
@@ -33,9 +35,14 @@ import org.jivesoftware.openfire.cluster.ClusterNodeInfo;
 import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.openfire.container.PluginClassLoader;
 import org.jivesoftware.openfire.container.PluginManager;
-import org.jivesoftware.util.*;
+import org.jivesoftware.util.InitializationException;
+import org.jivesoftware.util.JiveConstants;
+import org.jivesoftware.util.JiveGlobals;
+import org.jivesoftware.util.PropertyEventDispatcher;
+import org.jivesoftware.util.PropertyEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.xmpp.packet.JID;
 
 /**
  * Creates Cache objects. The returned caches will either be local or clustered
@@ -102,6 +109,7 @@ public class CacheFactory {
         cacheNames.put("Privacy Lists", "listsCache");
         cacheNames.put("Remote Users Existence", "remoteUsersCache");
         cacheNames.put("Roster", "username2roster");
+        cacheNames.put("RosterItems", "username2rosterItems");
         cacheNames.put("User", "userCache");
         cacheNames.put("Locked Out Accounts", "lockOutCache");
         cacheNames.put("VCard", "vcardCache");
@@ -128,6 +136,9 @@ public class CacheFactory {
         cacheNames.put("Entity Capabilities Users", "entityCapabilitiesUsers");
         cacheNames.put("PEPServiceManager", "pepServiceManager");
         cacheNames.put("Published Items", "publishedItems");
+        cacheNames.put("JID Node-parts", "jidNodeprep");
+        cacheNames.put("JID Domain-parts", "jidDomainprep");
+        cacheNames.put("JID Resource-parts", "jidResourceprep");
 
         cacheProps.put("cache.fileTransfer.size", 128 * 1024l);
         cacheProps.put("cache.fileTransfer.maxLifetime", 1000 * 60 * 10l);
@@ -147,6 +158,8 @@ public class CacheFactory {
         cacheProps.put("cache.groupMeta.maxLifetime", JiveConstants.MINUTE * 15);
         cacheProps.put("cache.username2roster.size", 1024 * 1024l);
         cacheProps.put("cache.username2roster.maxLifetime", JiveConstants.MINUTE * 30);
+        cacheProps.put("cache.username2rosterItems.size", 1024 * 1024l);
+        cacheProps.put("cache.username2rosterItems.maxLifetime", JiveConstants.MINUTE * 10);
         cacheProps.put("cache.javascript.size", 128 * 1024l);
         cacheProps.put("cache.javascript.maxLifetime", 3600 * 24 * 10l);
         cacheProps.put("cache.ldap.size", 512 * 1024l);
@@ -201,6 +214,14 @@ public class CacheFactory {
         cacheProps.put("cache.pepServiceManager.maxLifetime", JiveConstants.MINUTE * 30);
         cacheProps.put("cache.publishedItems.size", 1024l * 1024 * 10);
         cacheProps.put("cache.publishedItems.maxLifetime", JiveConstants.MINUTE * 15);
+
+        // The JID-based classes (wrappers for Caffeine caches) take their default values from whatever is hardcoded in the JID implementation.
+        cacheProps.put("cache.jidNodeprep.size", JID.NODEPREP_CACHE.policy().eviction().get().getMaximum() );
+        cacheProps.put("cache.jidNodeprep.maxLifetime", JID.NODEPREP_CACHE.policy().expireAfterWrite().get().getExpiresAfter( TimeUnit.MILLISECONDS ) );
+        cacheProps.put("cache.jidDomainprep.size", JID.DOMAINPREP_CACHE.policy().eviction().get().getMaximum() );
+        cacheProps.put("cache.jidDomainprep.maxLifetime", JID.DOMAINPREP_CACHE.policy().expireAfterWrite().get().getExpiresAfter( TimeUnit.MILLISECONDS ) );
+        cacheProps.put("cache.jidResourceprep.size", JID.RESOURCEPREP_CACHE.policy().eviction().get().getMaximum() );
+        cacheProps.put("cache.jidResourceprep.maxLifetime", JID.RESOURCEPREP_CACHE.policy().expireAfterWrite().get().getExpiresAfter( TimeUnit.MILLISECONDS ) );
 
         PropertyEventDispatcher.addListener( new PropertyEventListener()
         {
@@ -703,6 +724,20 @@ public class CacheFactory {
         try {
             localCacheFactoryStrategy = (CacheFactoryStrategy) Class.forName(localCacheFactoryClass).newInstance();
             cacheFactoryStrategy = localCacheFactoryStrategy;
+
+            // Update the JID-internal caches, if they're configured differently than their default.
+            JID.NODEPREP_CACHE.policy().eviction().get().setMaximum( getMaxCacheSize( "jidNodeprep" ) );
+            JID.NODEPREP_CACHE.policy().expireAfterWrite().get().setExpiresAfter( getMaxCacheLifetime( "jidNodeprep" ), TimeUnit.MILLISECONDS );
+            JID.DOMAINPREP_CACHE.policy().eviction().get().setMaximum( getMaxCacheSize( "jidDomainprep" ) );
+            JID.DOMAINPREP_CACHE.policy().expireAfterWrite().get().setExpiresAfter( getMaxCacheLifetime( "jidDomainprep" ), TimeUnit.MILLISECONDS );
+            JID.RESOURCEPREP_CACHE.policy().eviction().get().setMaximum( getMaxCacheSize( "jidResourceprep" ) );
+            JID.RESOURCEPREP_CACHE.policy().expireAfterWrite().get().setExpiresAfter( getMaxCacheLifetime( "jidResourceprep" ), TimeUnit.MILLISECONDS );
+
+            // Mock cache creation for the JID-internal classes, by wrapping them in a compatibility layer.
+            caches.put("JID Node-parts", CaffeineCache.of( JID.NODEPREP_CACHE, "JID Node-parts" ));
+            caches.put("JID Domain-parts", CaffeineCache.of( JID.DOMAINPREP_CACHE, "JID Domain-parts" ));
+            caches.put("JID Resource-parts", CaffeineCache.of( JID.RESOURCEPREP_CACHE, "JID Resource-parts" ));
+
         } catch (Exception e) {
             log.error("Failed to instantiate local cache factory strategy: " + localCacheFactoryClass, e);
              throw new InitializationException(e);
@@ -822,14 +857,14 @@ public class CacheFactory {
     public static synchronized void joinedCluster() {
         cacheFactoryStrategy = clusteredCacheFactoryStrategy;
         // Loop through local caches and switch them to clustered cache (copy content)
-        for (Cache cache : getAllCaches()) {
-            // skip local-only caches
-            if (localOnly.contains(cache.getName())) continue;
-            CacheWrapper cacheWrapper = ((CacheWrapper) cache);
-            Cache clusteredCache = cacheFactoryStrategy.createCache(cacheWrapper.getName());
-            clusteredCache.putAll(cache);
-            cacheWrapper.setWrappedCache(clusteredCache);
-        }
+        Arrays.stream(getAllCaches())
+            .filter(CacheFactory::isClusterableCache)
+            .forEach(cache -> {
+                final CacheWrapper cacheWrapper = ((CacheWrapper) cache);
+                final Cache clusteredCache = cacheFactoryStrategy.createCache(cacheWrapper.getName());
+                clusteredCache.putAll(cache);
+                cacheWrapper.setWrappedCache(clusteredCache);
+            });
         clusteringStarting = false;
         clusteringStarted = true;
         log.info("Clustering started; cache migration complete");
@@ -844,14 +879,32 @@ public class CacheFactory {
         cacheFactoryStrategy = localCacheFactoryStrategy;
 
         // Loop through clustered caches and change them to local caches (copy content)
-        for (Cache cache : getAllCaches()) {
-            // skip local-only caches
-            if (localOnly.contains(cache.getName())) continue;
-            CacheWrapper cacheWrapper = ((CacheWrapper) cache);
-            Cache standaloneCache = cacheFactoryStrategy.createCache(cacheWrapper.getName());
-            standaloneCache.putAll(cache);
-            cacheWrapper.setWrappedCache(standaloneCache);
-        }
+        Arrays.stream(getAllCaches())
+            .filter(CacheFactory::isClusterableCache)
+            .forEach(cache -> {
+                final CacheWrapper cacheWrapper = ((CacheWrapper) cache);
+                final Cache standaloneCache = cacheFactoryStrategy.createCache(cacheWrapper.getName());
+                standaloneCache.putAll(cache);
+                cacheWrapper.setWrappedCache(standaloneCache);
+            });
         log.info("Clustering stopped; cache migration complete");
     }
+
+    /**
+     * Indicates if the supplied Cache is "clusterable". This is used to determine if a cache should be migrated
+     * between a {@link DefaultCache} and a clustered cache when the node joins/leaves the cluster.
+     * <p>
+     * A cache is considered 'clusterable' if;
+     * <ul>
+     *     <li>the cache is not a 'local' cache - which apply to the local node only so do not need to be clustered, and</li>
+     *     <li>the cache is actually a {@link CacheWrapper} which wraps the underlying default or clustered cache</li>
+     * </ul>
+     *
+     * @param cache the cache to check
+     * @return {@code true} if the cache can be converted to/from a clustered cache, otherwise {@code false}
+     */
+    private static boolean isClusterableCache(final Cache cache) {
+        return cache instanceof CacheWrapper && !localOnly.contains(cache.getName());
+    }
+
 }

@@ -107,6 +107,7 @@ import org.jivesoftware.openfire.security.SecurityAuditManager;
 import org.jivesoftware.openfire.session.ConnectionSettings;
 import org.jivesoftware.openfire.session.RemoteSessionLocator;
 import org.jivesoftware.openfire.session.SoftwareVersionManager;
+import org.jivesoftware.openfire.session.SoftwareServerVersionManager;
 import org.jivesoftware.openfire.spi.ConnectionManagerImpl;
 import org.jivesoftware.openfire.spi.ConnectionType;
 import org.jivesoftware.openfire.spi.PacketDelivererImpl;
@@ -126,6 +127,7 @@ import org.jivesoftware.util.LocaleUtils;
 import org.jivesoftware.util.Log;
 import org.jivesoftware.util.SystemProperty;
 import org.jivesoftware.util.TaskEngine;
+import org.jivesoftware.openfire.archive.ArchiveManager;
 import org.jivesoftware.util.cache.CacheFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -514,7 +516,7 @@ public class XMPPServer {
 
         // steps from index.jsp
         String localeCode = JiveGlobals.getXMLProperty("autosetup.locale");
-        logger.warn("Setting locale to" + localeCode);
+        logger.warn("Setting locale to " + localeCode);
         JiveGlobals.setLocale(LocaleUtils.localeCodeToLocale(localeCode.trim()));
 
         // steps from setup-host-settings.jsp
@@ -802,9 +804,11 @@ public class XMPPServer {
         loadModule(InternalComponentManager.class.getName());
         loadModule(MultiUserChatManager.class.getName());
         loadModule(IQMessageCarbonsHandler.class.getName());
+        loadModule(ArchiveManager.class.getName());
         loadModule(CertificateStoreManager.class.getName());
         loadModule(EntityCapabilitiesManager.class.getName());
         loadModule(SoftwareVersionManager.class.getName());
+        loadModule(SoftwareServerVersionManager.class.getName());
 
         // Load this module always last since we don't want to start listening for clients
         // before the rest of the modules have been started
@@ -1385,6 +1389,17 @@ public class XMPPServer {
      */
     public PubSubModule getPubSubModule() {
         return (PubSubModule) modules.get(PubSubModule.class);
+    }
+
+    /**
+     * Returns the <code>ArchiveManager</code> registered with this server. The
+     * <code>ArchiveManager</code> was registered with the server as a module while starting up
+     * the server.
+     *
+     * @return the <code>ArchiveManager</code> registered with this server.
+     */
+    public ArchiveManager getArchiveManager() {
+        return (ArchiveManager) modules.get(ArchiveManager.class);
     }
 
     /**

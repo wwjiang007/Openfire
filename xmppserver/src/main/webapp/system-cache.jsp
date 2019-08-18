@@ -197,7 +197,6 @@
         int entries = cache.size();
         memUsed = (double)cache.getCacheSize()/(1024*1024);
         totalMem = (double)cache.getMaxCacheSize()/(1024*1024);
-        freeMem = 100 - 100*memUsed/totalMem;
         usedMem = 100*memUsed/totalMem;
         hits = cache.getCacheHits();
         misses = cache.getCacheMisses();
@@ -208,7 +207,7 @@
         else {
             double hitValue = 100*(double)hits/(hits+misses);
             hitPercent = percentFormat.format(hitValue) + "%";
-            lowEffec = (hits > 500 && hitValue < 85.0 && freeMem < 20.0);
+            lowEffec = (hits+misses > 500 && hitValue < 85.0 && usedMem >= 80.0);
         }
         if (cache instanceof CacheWrapper && ((CacheWrapper) cache).getWrappedCache() instanceof DefaultCache) {
             culls = new Long[3];
@@ -222,7 +221,7 @@
         // OF-1365: Don't allow caches that do not expire to be purged. Many of these caches store data that cannot be recovered again.
         final boolean canPurge = cache.getMaxLifetime() > -1;
 %>
-    <tr class="<%= (lowEffec ? "jive-error" : "") %>">
+    <tr>
         <td class="c1">
             <table cellpadding="0" cellspacing="0" border="0">
             <tr>
@@ -262,7 +261,9 @@
             <%=numberFormatter.format(hits)%>/<%=numberFormatter.format(hits + misses)%>&nbsp;
         </td>
         <td class="c4" style="text-align: left; padding-left:0;">
+            <% if (lowEffec) { %><span style="color: red;"><% } %>
             (<%=hitPercent%>)
+            <% if (lowEffec) { %>*</span><% } %>
         </td>
         <td class="c4" style="text-align: center">
             <% if (culls != null) {%>

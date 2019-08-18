@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.TimeZone;
+import java.util.stream.Collectors;
 
 import javax.naming.NamingEnumeration;
 import javax.naming.directory.Attribute;
@@ -61,7 +62,9 @@ public class LdapUserProvider implements UserProvider {
     private LdapManager manager;
     private Map<String, String> searchFields;
     private int userCount = -1;
-    private long expiresStamp = System.currentTimeMillis();
+    private long userCountExpiresStamp = System.currentTimeMillis();
+    private transient List<String> allUsernames = null;
+    private long allUserNamesExpiresStamp = System.currentTimeMillis();
 
     public LdapUserProvider() {
         // Convert XML based provider setup to Database based
@@ -195,20 +198,24 @@ public class LdapUserProvider implements UserProvider {
     @Override
     public int getUserCount() {
         // Cache user count for 5 minutes.
-        if (userCount != -1 && System.currentTimeMillis() < expiresStamp) {
+        if (userCount != -1 && System.currentTimeMillis() < userCountExpiresStamp ) {
             return userCount;
         }
         this.userCount = manager.retrieveListCount(
                 manager.getUsernameField(),
                 MessageFormat.format(manager.getSearchFilter(), "*")
         );
-        this.expiresStamp = System.currentTimeMillis() + JiveConstants.MINUTE *5;
+        this.userCountExpiresStamp = System.currentTimeMillis() + JiveConstants.MINUTE *5;
         return this.userCount;
     }
 
     @Override
     public Collection<String> getUsernames() {
-        return manager.retrieveList(
+        // Cache usernames for 5 minutes.
+        if ( allUsernames != null && System.currentTimeMillis() < allUserNamesExpiresStamp ) {
+            return allUsernames;
+        }
+        this.allUsernames = manager.retrieveList(
                 manager.getUsernameField(),
                 MessageFormat.format(manager.getSearchFilter(), "*"),
                 -1,
@@ -216,11 +223,24 @@ public class LdapUserProvider implements UserProvider {
                 null,
                 true
         );
+
+        // When all usernames have been fetched, we can update various other cached values.
+        this.userCount = this.allUsernames.size();
+        this.allUserNamesExpiresStamp = System.currentTimeMillis() + JiveConstants.MINUTE *5;
+        this.userCountExpiresStamp = this.allUserNamesExpiresStamp;
+        return this.allUsernames;
     }
     
     @Override
     public Collection<User> getUsers() {
-        return getUsers(-1, -1);
+        final Collection<User> users = getUsers( -1, -1 );
+
+        // When all user have been fetched, we can update various other cached values.
+        this.allUsernames = users.stream().map( User::getUsername ).collect( Collectors.toList() );
+        this.userCount = this.allUsernames.size();
+        this.allUserNamesExpiresStamp = System.currentTimeMillis() + JiveConstants.MINUTE *5;
+        this.userCountExpiresStamp = this.allUserNamesExpiresStamp;
+        return users;
     }
 
     @Override
