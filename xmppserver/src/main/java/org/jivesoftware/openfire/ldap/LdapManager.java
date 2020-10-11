@@ -16,6 +16,7 @@
 
 package org.jivesoftware.openfire.ldap;
 
+import org.jivesoftware.admin.LdapUserTester;
 import org.jivesoftware.openfire.group.GroupNotFoundException;
 import org.jivesoftware.openfire.user.UserNotFoundException;
 import org.jivesoftware.util.JiveGlobals;
@@ -47,6 +48,7 @@ import javax.naming.CompositeName;
 import javax.naming.Context;
 import javax.naming.InvalidNameException;
 import javax.naming.Name;
+import javax.naming.NameNotFoundException;
 import javax.naming.NamingEnumeration;
 import javax.naming.NamingException;
 import javax.naming.directory.Attribute;
@@ -212,7 +214,7 @@ public class LdapManager {
     private int readTimeout = -1;
     private String usernameField;
     private String usernameSuffix;
-    private String nameField;
+    private LdapUserTester.PropertyMapping nameField;
     private String emailField;
     private LdapName baseDN;
     private LdapName alternateBaseDN;
@@ -350,10 +352,13 @@ public class LdapManager {
 
         alternateBaseDN = parseAsLdapNameOrLog( properties.get("ldap.alternateBaseDN") );
 
-        nameField = properties.get("ldap.nameField");
-        if (nameField == null) {
-            nameField = "cn";
+        String nameFieldValue = properties.get("ldap.nameField");
+        if (nameFieldValue == null) {
+            nameFieldValue = "cn";
         }
+
+        nameField = new LdapUserTester.PropertyMapping(nameFieldValue);
+
         emailField = properties.get("ldap.emailField");
         if (emailField == null) {
             emailField = "mail";
@@ -454,6 +459,56 @@ public class LdapManager {
         if (ldapDebugEnabled) {
             System.err.println(buf.toString());
         }
+    }
+
+    /**
+     * Splits a string formatted as an LDAP filter, such as <code>(&(part-a)(part-b)(part-c))</code>, in separate parts.
+     * When the provided input cannot be parsed as an LDAP filter, the returned collection contains one element: the
+     * original input.
+     *
+     * @param input The value to be split.
+     * @return The splitted value.
+     */
+    public static List<String> splitFilter( final String input )
+    {
+        final List<String> result = new ArrayList<>();
+        if ( input.length() >= 5 && input.startsWith("(") && input.endsWith("))") && (input.charAt(1) == '&' || input.charAt(1) == '|') && input.charAt(2) == '(' )
+        {
+            // Strip off the outer parenthesis and search operator.
+            String stripped = input.substring(2, input.length() - 1);
+
+            // The remainder should consist only of ()-surrounded parts.
+            // We'll remove the leading '(' and trailing ')' character, then split on ")(" to get all parts.
+            stripped = stripped.substring(1, stripped.length() - 1);
+
+            final String[] split = stripped.split("\\)\\(");
+            result.addAll(Arrays.asList(split));
+        }
+        else
+        {
+            result.add(input);
+        }
+
+        return result;
+    }
+
+    /**
+     * Joins individual strings into one, formatted as an LDAP filter, such as <code>(&(part-a)(part-b)(part-c))</code>.
+     *
+     * @param operator the second character of the resulting string.
+     * @param parts    The parts to be joined into one string.
+     * @return The joined string value.
+     */
+    public static String joinFilter( char operator, List<String> parts )
+    {
+        final StringBuilder result = new StringBuilder();
+        result.append('(').append(operator);
+        for ( final String part : parts )
+        {
+            result.append('(').append(part).append(')');
+        }
+        result.append(')');
+        return result.toString();
     }
 
     /**
@@ -654,7 +709,7 @@ public class LdapManager {
         if (connTimeout > 0) {
             env.put("com.sun.jndi.ldap.connect.timeout", String.valueOf(connTimeout));
         } else {
-            env.put("com.sun.jndi.ldap.connect.timeout", "10000");
+            env.put("com.sun.jndi.ldap.connect.timeout", "4000");
         }
 
         if (readTimeout > 0) {
@@ -762,7 +817,7 @@ public class LdapManager {
             if (connTimeout > 0) {
                     env.put("com.sun.jndi.ldap.connect.timeout", String.valueOf(connTimeout));
                 } else {
-                    env.put("com.sun.jndi.ldap.connect.timeout", "10000");
+                    env.put("com.sun.jndi.ldap.connect.timeout", "4000");
                 }
 
             if (readTimeout > 0) {
@@ -801,7 +856,7 @@ public class LdapManager {
                     Log.debug("... peer host: {}, CipherSuite: {}", session.getPeerHost(), session.getCipherSuite());
 
                     ctx.addToEnvironment(Context.SECURITY_AUTHENTICATION, "simple");
-                    ctx.addToEnvironment(Context.SECURITY_PRINCIPAL, createNewAbsolute( baseDN, userRDN ));
+                    ctx.addToEnvironment(Context.SECURITY_PRINCIPAL, createNewAbsolute(baseDN, userRDN).toString());
                     ctx.addToEnvironment(Context.SECURITY_CREDENTIALS, password);
 
                 } catch (java.io.IOException ex) {
@@ -844,11 +899,15 @@ public class LdapManager {
                      * the secure connection has been established. */
                     if (!(startTlsEnabled && !sslEnabled)) {
                         env.put(Context.SECURITY_AUTHENTICATION, "simple");
-                        env.put(Context.SECURITY_PRINCIPAL, createNewAbsolute( alternateBaseDN, userRDN ));
+                        env.put(Context.SECURITY_PRINCIPAL, createNewAbsolute(alternateBaseDN, userRDN).toString());
                         env.put(Context.SECURITY_CREDENTIALS, password);
                     }
 
-                        env.put("com.sun.jndi.ldap.connect.timeout", "10000");
+                    if (connTimeout > 0) {
+                        env.put("com.sun.jndi.ldap.connect.timeout", String.valueOf(connTimeout));
+                    } else {
+                        env.put("com.sun.jndi.ldap.connect.timeout", "4000");
+                    }
 
                     if (ldapDebugEnabled) {
                         env.put("com.sun.jndi.ldap.trace.ber", System.err);
@@ -881,7 +940,7 @@ public class LdapManager {
                             Log.debug("... peer host: {}, CipherSuite: {}", session.getPeerHost(), session.getCipherSuite());
 
                             ctx.addToEnvironment(Context.SECURITY_AUTHENTICATION, "simple");
-                            ctx.addToEnvironment(Context.SECURITY_PRINCIPAL, createNewAbsolute( alternateBaseDN, userRDN ));
+                            ctx.addToEnvironment(Context.SECURITY_PRINCIPAL, createNewAbsolute(alternateBaseDN, userRDN).toString());
                             ctx.addToEnvironment(Context.SECURITY_CREDENTIALS, password);
 
                         } catch (java.io.IOException ex) {
@@ -1276,7 +1335,7 @@ public class LdapManager {
      * @return true if the given DN is matching the group filter. false oterwise.
      * @throws NamingException if the search for the dn fails.
      */
-    public boolean isGroupDN(LdapName dn) throws NamingException {
+    public boolean isGroupDN(LdapName dn) {
         Log.debug("LdapManager: Trying to check if DN is a group. DN: {}, Base DN: {} ...", dn, baseDN);
 
         // is it a sub DN of the base DN?
@@ -1311,17 +1370,21 @@ public class LdapManager {
             Log.debug("LdapManager: DN is group: {}? {}!", dn, result);
             return result;
         }
-        catch (final Exception e) {
-            Log.debug("LdapManager: Exception thrown when checking if DN is a group {}", dn, e);
-            throw e;
+        catch (final NameNotFoundException e) {
+            Log.info("LdapManager: Given DN not found (while checking if DN is a group)! {}", dn);
+            return false;
+        }
+        catch (final NamingException e) {
+            Log.error("LdapManager: Exception thrown while checking if DN is a group {}", dn, e);
+            return false;
         }
         finally {
             try {
                 if (ctx != null)
                     ctx.close();
             }
-            catch (Exception ignored) {
-                // Ignore.
+            catch (Exception ex) {
+                Log.debug("An exception occurred while trying to close a LDAP context after trying to verify that DN '{}' is a group.", dn, ex);
             }
         }
     }
@@ -1531,7 +1594,7 @@ public class LdapManager {
      *
      * @return the LDAP field that that corresponds to the user's name.
      */
-    public String getNameField() {
+    public LdapUserTester.PropertyMapping getNameField() {
         return nameField;
     }
 
@@ -1541,13 +1604,12 @@ public class LdapManager {
      *
      * @param nameField the LDAP field that that corresponds to the user's name.
      */
-    public void setNameField(String nameField) {
+    public void setNameField(LdapUserTester.PropertyMapping nameField) {
         this.nameField = nameField;
-        if (nameField == null) {
+        if (nameField == null || nameField.getDisplayFormat() == null || nameField.getDisplayFormat().isEmpty() ) {
             properties.remove("ldap.nameField");
-        }
-        else {
-            properties.put("ldap.nameField", nameField);
+        } else {
+            properties.put("ldap.nameField", nameField.getDisplayFormat());
         }
     }
 
@@ -2314,8 +2376,8 @@ public class LdapManager {
                 if (ctx != null) {
                     ctx.close();
                 }
-            } catch (Exception ignored) {
-                // Ignore.
+            } catch (Exception ex) {
+                Log.debug("An exception occurred while trying to close a LDAP context after trying to retrieve a single attribute element for {}.", attribute, ex);
             }
         }
     }
@@ -2355,15 +2417,15 @@ public class LdapManager {
                 if (values != null)
                     values.close();
             }
-            catch (Exception ignored) {
-                // Ignore.
+            catch (Exception ex) {
+                Log.debug("An exception occurred while trying to close values after trying to read attribute {}.", attributeName, ex);
             }
             try {
                 if (ctx != null)
                     ctx.close();
             }
-            catch (Exception ignored) {
-                // Ignore.
+            catch (Exception ex) {
+                Log.debug("An exception occurred while trying to close a LDAP context after trying to read attribute {}.", attributeName, ex);
             }
         }
     }
