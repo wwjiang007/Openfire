@@ -741,7 +741,7 @@ public class SessionManager extends BasicModule implements ClusterEventListener
         if (session.getAddress() != null && routingTable != null &&
                 session.getAddress().toBareJID().trim().length() != 0) {
             // Update route to unavailable session (anonymous or not)
-            routingTable.removeClientRoute(session.getAddress());
+            routingTable.addClientRoute(session.getAddress(), session); // Note that _adding_ the route is not a typo, as previously assumed. See OF-2210 and OF-2012.
         }
     }
 
@@ -1406,7 +1406,7 @@ public class SessionManager extends BasicModule implements ClusterEventListener
      * Sends a message with a given subject and body to one or more user sessions related to the
      * specified address. If address is null or the address's node is null then the message will be
      * sent to all the user sessions. But if the address includes a node but no resource then
-     * the message will be sent to all the user sessions of the requeted user (defined by the node).
+     * the message will be sent to all the user sessions of the requested user (defined by the node).
      * Finally, if the address is a full JID then the message will be sent to the session associated
      * to the full JID. If no session is found then the message is not sent.
      *
@@ -1416,20 +1416,27 @@ public class SessionManager extends BasicModule implements ClusterEventListener
      */
     public void sendServerMessage(JID address, String subject, String body) {
         Message packet = createServerMessage(subject, body);
-        if (address == null || address.getNode() == null || !userManager.isRegisteredUser(address)) {
+        if (address == null || address.getNode() == null) {
+            // No address, or no node: broadcast to all active user sessions on the server.
             broadcast(packet);
         }
         else if (address.getResource() == null || address.getResource().length() < 1) {
+            // Node, but no resource: broadcast to all active sessions for the user.
             userBroadcast(address.getNode(), packet);
         }
         else {
-            routingTable.routePacket(address, packet, true);
+            // Full JID: address to the session, if one exists.
+            for (JID sessionAddress : routingTable.getRoutes(address, null)) {
+                packet.setTo(sessionAddress); // expected to be equal to 'address'.
+                routingTable.routePacket(sessionAddress, packet, true);
+            }
         }
     }
 
     private Message createServerMessage(String subject, String body) {
         Message message = new Message();
         message.setFrom(serverAddress);
+        message.setType(Message.Type.headline);
         if (subject != null) {
             message.setSubject(subject);
         }
